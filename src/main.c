@@ -12,11 +12,12 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
+#define MAX_APs 20
+
 static const char *TAG = "ESP32_AP_CONFIG";
 
-// Variáveis de configuração
 char config_ssid[32] = "";
-char config_pass[32] = "";
+char config_pass[64] = "";
 char config_ip[16] = "";
 char config_gateway[16] = "";
 char config_mask[16] = "";
@@ -24,12 +25,10 @@ char config_dns[16] = "";
 char config_user[32] = "";
 char config_userpass[32] = "";
 
-// WiFi scan results
-wifi_ap_record_t ap_records[20];
+wifi_ap_record_t ap_records[MAX_APs];
 uint16_t ap_count = 0;
 
-// Inicializa SPIFFS
-void init_spiffs() {
+void init_spiffs(void) {
     ESP_LOGI(TAG, "Inicializando SPIFFS");
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
@@ -43,49 +42,45 @@ void init_spiffs() {
     }
 }
 
-// Função para escanear redes Wi-Fi
 void wifi_scan() {
+    ESP_LOGI(TAG, "Iniciando WiFi scan...");
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    wifi_scan_config_t scan_config = { .ssid = 0, .bssid = 0, .channel = 0, .show_hidden = true };
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    wifi_scan_config_t scan_config = { .ssid = NULL, .bssid = NULL, .channel = 0, .show_hidden = true };
     ESP_ERROR_CHECK(esp_wifi_scan_start(&scan_config, true));
+
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
-    if (ap_count > 20) ap_count = 20;
+    if (ap_count > MAX_APs) ap_count = MAX_APs;
     ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&ap_count, ap_records));
+
+    ESP_LOGI(TAG, "WiFi scan concluído. %d redes encontradas.", ap_count);
+
+    ESP_ERROR_CHECK(esp_wifi_stop());
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    ESP_LOGI(TAG, "WiFi voltou para modo AP.");
 }
 
-// Salvar configuração no SPIFFS
-void save_config_to_spiffs() {
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddStringToObject(root, "ssid", config_ssid);
-    cJSON_AddStringToObject(root, "pass", config_pass);
-    cJSON_AddStringToObject(root, "ip", config_ip);
-    cJSON_AddStringToObject(root, "gateway", config_gateway);
-    cJSON_AddStringToObject(root, "mask", config_mask);
-    cJSON_AddStringToObject(root, "dns", config_dns);
-    cJSON_AddStringToObject(root, "user", config_user);
-    cJSON_AddStringToObject(root, "userpass", config_userpass);
-
-    char *json_string = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-
-    FILE *f = fopen("/spiffs/config.json", "w");
-    if (f) {
-        fputs(json_string, f);
-        fclose(f);
-        ESP_LOGI(TAG, "Configuração salva no SPIFFS.");
-    } else {
-        ESP_LOGE(TAG, "Erro ao salvar configuração no SPIFFS.");
-    }
-    free(json_string);
+esp_err_t root_get_handler(httpd_req_t *req) {
+    const char *resp =
+        "<html><body style='text-align:center;'>"
+        "<h1>Wi-Fi Manager</h1>"
+        "<a href='/config' style='display:block;background:#03A9F4;color:white;padding:12px;margin:10px auto;border-radius:6px;text-decoration:none;'>Configure WiFi</a>"
+        "<a href='/exit' style='display:block;background:#03A9F4;color:white;padding:12px;margin:10px auto;border-radius:6px;text-decoration:none;'>Exit</a>"
+        "</body></html>";
+    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
 }
 
-// Página de configuração (WiFi scan + form)
 esp_err_t config_get_handler(httpd_req_t *req) {
-    wifi_scan();
+    ESP_LOGI(TAG, "Handler /config chamado.");
+    char *form = malloc(4096);
+    if (!form) {
+        ESP_LOGE(TAG, "Falha ao alocar memória para o form.");
+        return ESP_FAIL;
+    }
 
-    char form[2048] = "<html><body style='text-align:center;'><h2>Configurar WiFi</h2><form action='/submit' method='get'>";
-
+    strcpy(form, "<html><body style='text-align:center;'><h2>Configurar WiFi</h2><form action='/submit' method='get'>");
     strcat(form, "Redes WiFi Disponíveis:<br>");
     for (int i = 0; i < ap_count; i++) {
         char line[128];
@@ -103,20 +98,23 @@ esp_err_t config_get_handler(httpd_req_t *req) {
         "Usuário: <input type='text' name='user'><br><br>"
         "Senha de Usuário: <input type='password' name='userpass'><br><br>"
         "<input type='submit' value='Salvar'>"
-        "</form><br><a href='/'>Voltar</a></body></html>"
-    );
+        "</form><br><a href='/'>Voltar</a></body></html>");
 
-    return httpd_resp_send(req, form, HTTPD_RESP_USE_STRLEN);
+    esp_err_t result = httpd_resp_send(req, form, HTTPD_RESP_USE_STRLEN);
+    free(form);
+    return result;
 }
 
-// Processa formulário
+esp_err_t exit_get_handler(httpd_req_t *req) {
+    const char *resp = "<html><body><h2>Saindo do modo de configuração</h2><p>Obrigado!</p></body></html>";
+    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+}
+
 esp_err_t form_handler(httpd_req_t *req) {
     char buf[512];
     size_t len = httpd_req_get_url_query_len(req) + 1;
-
-    if (len > 1) {
+    if (len > 1 && len < sizeof(buf)) {
         httpd_req_get_url_query_str(req, buf, len);
-
         httpd_query_key_value(buf, "ssid", config_ssid, sizeof(config_ssid));
         httpd_query_key_value(buf, "pass", config_pass, sizeof(config_pass));
         httpd_query_key_value(buf, "ip", config_ip, sizeof(config_ip));
@@ -125,41 +123,17 @@ esp_err_t form_handler(httpd_req_t *req) {
         httpd_query_key_value(buf, "dns", config_dns, sizeof(config_dns));
         httpd_query_key_value(buf, "user", config_user, sizeof(config_user));
         httpd_query_key_value(buf, "userpass", config_userpass, sizeof(config_userpass));
-
-        save_config_to_spiffs();
+        ESP_LOGI(TAG, "Configurações recebidas: SSID=%s, IP=%s", config_ssid, config_ip);
     }
 
-    const char *resp =
-        "<html><body style='text-align:center;'><h3>Configurações salvas!</h3><a href='/'>Voltar</a></body></html>";
+    const char *resp = "<html><body><h3>Configurações salvas!</h3><a href='/'>Voltar</a></body></html>";
     return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
 }
 
-// Página inicial
-esp_err_t root_get_handler(httpd_req_t *req) {
-    const char *resp =
-        "<html><body style='text-align:center;'>"
-        "<h1>WiFi Manager</h1>"
-        "<a href='/config'>Configurar WiFi</a><br><br>"
-        "<a href='/exit'>Sair</a>"
-        "</body></html>";
-    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-}
-
-// Página de saída
-esp_err_t exit_get_handler(httpd_req_t *req) {
-    const char *resp =
-        "<html><body style='text-align:center;'>"
-        "<h2>Saindo do modo configuração</h2>"
-        "<p>Obrigado!</p>"
-        "</body></html>";
-    return httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
-}
-
-// Inicializa servidor
 void start_web_server() {
+    wifi_scan();
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     httpd_handle_t server = NULL;
-
     if (httpd_start(&server, &config) == ESP_OK) {
         httpd_register_uri_handler(server, &(httpd_uri_t){ .uri = "/", .method = HTTP_GET, .handler = root_get_handler });
         httpd_register_uri_handler(server, &(httpd_uri_t){ .uri = "/config", .method = HTTP_GET, .handler = config_get_handler });
@@ -168,7 +142,6 @@ void start_web_server() {
     }
 }
 
-// Modo Access Point
 void start_wifi_ap() {
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
@@ -194,8 +167,7 @@ void start_wifi_ap() {
     start_web_server();
 }
 
-// Função principal
-void app_main() {
+void app_main(void) {
     ESP_ERROR_CHECK(nvs_flash_init());
     init_spiffs();
     start_wifi_ap();
