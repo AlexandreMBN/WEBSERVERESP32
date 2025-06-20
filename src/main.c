@@ -74,23 +74,34 @@ esp_err_t root_get_handler(httpd_req_t *req) {
 
 esp_err_t config_get_handler(httpd_req_t *req) {
     ESP_LOGI(TAG, "Handler /config chamado.");
-    char *form = malloc(4096);
+    char *form = malloc(8192);
     if (!form) {
         ESP_LOGE(TAG, "Falha ao alocar memória para o form.");
         return ESP_FAIL;
     }
 
-    strcpy(form, "<html><head><meta charset='UTF-8'></head><body style='text-align:center;'><h2>Configurar WiFi</h2><form action='/submit' method='get'>");
+    strcpy(form,
+        "<html><head><meta charset='UTF-8'>"
+        "<script>"
+        "function fillSSID(ssid) {"
+        "document.getElementById('ssid').value = ssid;"
+        "}"
+        "</script>"
+        "</head><body style='text-align:center;'>"
+        "<h2>Configurar WiFi</h2>"
+        "<form action='/submit' method='get'>");
+
     strcat(form, "Redes WiFi Disponíveis:<br>");
     for (int i = 0; i < ap_count; i++) {
-        char line[128];
-        snprintf(line, sizeof(line), "<input type='radio' name='ssid' value='%s'>%s (RSSI:%d)<br>",
-                 ap_records[i].ssid, ap_records[i].ssid, ap_records[i].rssi);
+        char line[256];
+        snprintf(line, sizeof(line),
+            "<input type='radio' name='ssid_select' onclick=\"fillSSID('%s')\">%s (RSSI:%d)<br>",
+            ap_records[i].ssid, ap_records[i].ssid, ap_records[i].rssi);
         strcat(form, line);
     }
 
     strcat(form,
-        "<br>SSID: <input type='text' name='ssid'><br><br>"
+        "<br>SSID: <input type='text' id='ssid' name='ssid'><br><br>"
         "Senha WiFi: <input type='password' name='pass'><br><br>"
         "IP Estático: <input type='text' name='ip'><br><br>"
         "Gateway: <input type='text' name='gateway'><br><br>"
@@ -105,6 +116,7 @@ esp_err_t config_get_handler(httpd_req_t *req) {
     free(form);
     return result;
 }
+
 
 esp_err_t exit_get_handler(httpd_req_t *req) {
     const char *resp = "<html><body><h2>Saindo do modo de configuração</h2><p>Obrigado!</p></body></html>";
