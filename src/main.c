@@ -64,7 +64,7 @@ void wifi_scan() {
 
 esp_err_t root_get_handler(httpd_req_t *req) {
     const char *resp =
-        "<html><body style='text-align:center;'>"
+        "<html><head><meta charset='UTF-8'></head><body style='text-align:center;'>"
         "<h1>Wi-Fi Manager</h1>"
         "<a href='/config' style='display:block;background:#03A9F4;color:white;padding:12px;margin:10px auto;border-radius:6px;text-decoration:none;'>Configure WiFi</a>"
         "<a href='/exit' style='display:block;background:#03A9F4;color:white;padding:12px;margin:10px auto;border-radius:6px;text-decoration:none;'>Exit</a>"
@@ -80,7 +80,7 @@ esp_err_t config_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    strcpy(form, "<html><body style='text-align:center;'><h2>Configurar WiFi</h2><form action='/submit' method='get'>");
+    strcpy(form, "<html><head><meta charset='UTF-8'></head><body style='text-align:center;'><h2>Configurar WiFi</h2><form action='/submit' method='get'>");
     strcat(form, "Redes WiFi Disponíveis:<br>");
     for (int i = 0; i < ap_count; i++) {
         char line[128];
@@ -90,7 +90,8 @@ esp_err_t config_get_handler(httpd_req_t *req) {
     }
 
     strcat(form,
-        "<br>Senha WiFi: <input type='password' name='pass'><br><br>"
+        "<br>SSID: <input type='text' name='ssid'><br><br>"
+        "Senha WiFi: <input type='password' name='pass'><br><br>"
         "IP Estático: <input type='text' name='ip'><br><br>"
         "Gateway: <input type='text' name='gateway'><br><br>"
         "Máscara: <input type='text' name='mask'><br><br>"
